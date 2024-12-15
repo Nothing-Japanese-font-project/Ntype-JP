@@ -14,44 +14,35 @@ def getpoints(contour):
 def insertpoint(points, index, x, y, segmentType='curve'):
     points.insert(index, defcon.Point((x, y), segmentType=segmentType, smooth=True))
 
-def bolderhorizon(contour):
+def bolderhorizon(contour, clockwise):
     points = getpoints(contour)
-    adjust = 8
-    limit = 0
+    adjust = 16
+    limit = 32
     pos_x = []
     pos_y = []
-    mod = []
-    modded = []
+    mod = [0] * len(points)
     index = 0
     count = 0
-    for point in points:
-        pos_x.append(point.x)
-        pos_y.append(point.y)
-        mod.append(0)
-    for point in points:
-            index = count
-            tmp = pos_y[index -1]
-            if len(points) > 1:
-                while index + 1 < len(points) and abs(tmp - pos_y[index]) <= limit:
-                    if contour.clockwise:
-                        if index not in modded:
-                            mod[index] = adjust if pos_x[index] <= pos_x[index + 1] else -adjust
-                            modded.append(index)
-                        if index + 1 not in modded:
-                            mod[index + 1] = adjust if pos_x[index + 1] >= pos_x[index] else -adjust
-                            modded.append(index + 1)
-                    else:
-                        if index not in modded:
-                            mod[index] = adjust if pos_x[index] <= pos_x[index + 1] else -adjust
-                            modded.append(index)
-                        if index + 1 not in modded:
-                            mod[index + 1] = adjust if pos_x[index + 1] >= pos_x[index] else -adjust
-                            modded.append(index + 1)
-                    index += 1
-                count += 1
+    if len(points) > 1:
+        if clockwise==True:
+            for i in range(len(points)):
+                prev_index = (i - 1) % len(points)
+                next_index = (i + 1) % len(points)
+                if abs(points[i].y - points[prev_index].y) <= limit and mod[i] == 0:
+                    mod[i] = -adjust if points[i].x >= points[prev_index].x else adjust
+                if abs(points[i].y - points[next_index].y) <= limit and mod[i] == 0:
+                    mod[i] = -adjust if points[i].x <= points[next_index].x else adjust
+        else:
+            for i in range(len(points)):
+                prev_index = (i - 1) % len(points)
+                next_index = (i + 1) % len(points)
+                if abs(points[i].y - points[prev_index].y) <= limit and mod[i] == 0:
+                    mod[i] = adjust if points[i].x <= points[prev_index].x else -adjust
+                if abs(points[i].y - points[next_index].y) <= limit and mod[i] == 0:
+                    mod[i] = adjust if points[i].x >= points[next_index].x else -adjust
     contour.clear()
     for i in range(len(points)):
-        contour.appendPoint(defcon.Point((pos_x[i], pos_y[i] + mod[i]), segmentType=points[i].segmentType, smooth=points[i].smooth))
+        contour.appendPoint(defcon.Point((points[i].x, points[i].y + mod[i]), segmentType=points[i].segmentType, smooth=points[i].smooth))
 
 def roundifycorner(points, index, p_prev, p, p_next, adjust, d_limit, r_limit):
     ppx = p_prev.x
@@ -104,7 +95,7 @@ first = time.time()
 print("[",datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S") ,"] UFOファイル読み込み開始")
 
 font = defcon.Font(
-    path="./BIZUDPMincho-Regular.ttf.ufo"
+    path="./NotoSerifJP-SemiBold.otf.ufo"
 )
 
 start = time.time()
@@ -116,18 +107,27 @@ print("[",datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S") , "]", font.info
 print("[",datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S") , "] 合計", len(font), "字")
 print("[",datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S") , "] コンパイル前処理開始")
 
-'''
+font.info.familyName = "NType JP Test"
+font.info.styleName = "Bold"
+font.info.postscriptFamilyName = "NType JP Test"
+font.info.postscriptFullName = "NType JP Test Bold"
+font.info.versionMajor = 1
+font.info.versionMinor = 0
+
+
+
 print("[",datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S") ,"] 横画編集開始")
 
 for glyphs in tqdm.tqdm(font):
     for contour in glyphs:
-        bolderhorizon(contour)
+        clockwise = contour.clockwise
+        bolderhorizon(contour, clockwise)
 
-'''
+
 print("[",datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S") ,"] 角丸処理開始")
 
-size = 24
-limit = 48
+size = 16
+limit = 32
 
 for glyphs in tqdm.tqdm(font):
     for contour in glyphs:
