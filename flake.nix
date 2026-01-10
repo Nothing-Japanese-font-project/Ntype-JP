@@ -20,6 +20,11 @@
         shellHook = ''
           echo "Welcome to Ntype-JP development environment (via Flake 25.05)!"
           echo "Using uv for Python environment management (Python 3.13)."
+          echo ""
+          echo "💡 Commands:"
+          echo "  preview - Start the font preview server"
+          
+          alias preview="uv run serve_preview.py"
         '';
       };
     };

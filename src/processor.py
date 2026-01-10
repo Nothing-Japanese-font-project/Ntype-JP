@@ -19,6 +19,12 @@ def process_glyph_worker(glyph_data):
     enhancer.apply(glyph_data)
     rounder.apply(glyph_data)
     normalizer.apply(glyph_data)
+    
+    # 座標を整数に丸める（浮動小数点を排除してファイルサイズを削減）
+    for contour in glyph_data['contours']:
+        for p in contour['points']:
+            p['x'] = int(round(p['x']))
+            p['y'] = int(round(p['y']))
                 
     return glyph_data
 
@@ -68,18 +74,22 @@ class FontProcessor:
                 0xF900 <= unicode_val <= 0xFAFF or   # CJK Compatibility Ideographs
                 0x2E80 <= unicode_val <= 0x2FDF or   # CJK Radicals Supplement
                 unicode_val in (0x3005, 0x303B))     # 々, 〻
-
-    def process(self, use_parallel=True, max_workers=None):
-        print(f"[{datetime.datetime.now()}] Target identification...")
-        # unicodeDataを直接走査して対象グリフ名を一気に取得 (20秒程度かかるが最も確実)
-        target_names = []
-        for uni, names in self.font.unicodeData.items():
-            if self.is_target_glyph(uni):
-                target_names.extend(names)
+    def process(self, use_parallel=True, max_workers=None, subset_glyphs=None):
+        if subset_glyphs:
+            target_names = subset_glyphs
+            print(f"[{datetime.datetime.now()}] Subset mode: Processing {len(target_names)} specified glyphs.")
+        else:
+            print(f"[{datetime.datetime.now()}] Target identification...")
+            # unicodeDataを直接走査して対象グリフ名を一気に取得
+            target_names = []
+            for uni, names in self.font.unicodeData.items():
+                if self.is_target_glyph(uni):
+                    target_names.extend(names)
+            
+            target_names = sorted(list(set(target_names)))
+            print(f"[{datetime.datetime.now()}] Processing {len(target_names)} target glyphs.")
         
-        target_names = sorted(list(set(target_names)))
         total_targets = len(target_names)
-        print(f"[{datetime.datetime.now()}] Processing {total_targets} target glyphs.")
 
         def data_generator():
             for name in target_names:
@@ -115,27 +125,48 @@ class FontProcessor:
             finally:
                 self.font.releaseHeldNotifications()
 
-    def save_otf(self, output_path, optimize_cff=False):
-        if self.font.features.text:
+    def save_otf(self, output_path, optimize_cff=True, subset_glyphs=None):
+        font_to_compile = self.font
+        
+        if subset_glyphs:
+            print(f"[{datetime.datetime.now()}] Creating subset font for fast preview...")
+            # 最小限のフォントを作成
+            subset_font = defcon.Font()
+            # メタデータのコピー
+            for attr in ['familyName', 'styleName', 'unitsPerEm', 'ascender', 'descender', 'xHeight', 'capHeight']:
+                val = getattr(self.font.info, attr)
+                if val is not None:
+                    setattr(subset_font.info, attr, val)
+            
+            # 必要なグリフのコピー (.notdef は必須、サブセット時はフィーチャーは無視)
+            needed = set(subset_glyphs) | {".notdef", "space"}
+            for name in needed:
+                if name in self.font:
+                    subset_font.insertGlyph(self.font[name], name=name)
+            
+            font_to_compile = subset_font
+
+        if font_to_compile.features.text:
             print(f"[{datetime.datetime.now()}] Sanitizing features.fea (fixing aalt script errors)...")
             def sanitize_aalt(match):
                 block = match.group(0)
                 sub_block = re.sub(r'^\s*(script|language)\s+[^;]+;\s*$', '', block, flags=re.MULTILINE)
                 return sub_block
             
-            new_text = re.sub(r'feature aalt\s*\{.*?\}\s*aalt\s*;', sanitize_aalt, self.font.features.text, flags=re.DOTALL)
-            self.font.features.text = new_text
+            new_text = re.sub(r'feature aalt\s*\{.*?\}\s*aalt\s*;', sanitize_aalt, font_to_compile.features.text, flags=re.DOTALL)
+            font_to_compile.features.text = new_text
 
-        print(f"[{datetime.datetime.now()}] Compiling OTF (Optimization/Compression: {optimize_cff})...")
-        print(f"[{datetime.datetime.now()}] This may take a few minutes if optimization is enabled.")
+        print(f"[{datetime.datetime.now()}] Compiling OTF (CFFVersion: 2, Optimize: {optimize_cff})...")
+        # ufo2ftの内部でcffsubrが走る前にpost形式を3.0にする必要があるため、一旦最適化オフでコンパイル
+        otf = ufo2ft.compileOTF(font_to_compile, optimizeCFF=False, cffVersion=2)
         
-        otf = ufo2ft.compileOTF(self.font, optimizeCFF=False, cffVersion=2)
-        
+        # post形式 2.0 (デフォルト) はインデックス溢れで保存できないため 3.0 (名前なし) に変更
         otf["post"].formatType = 3.0
 
         if optimize_cff:
             import cffsubr
-            print(f"[{datetime.datetime.now()}] Subroutinizing CFF2 (this will take some time)...")
+            print(f"[{datetime.datetime.now()}] Subroutinizing CFF2 (this will take a few minutes for 65k glyphs)...")
+            # 手動でサブルーチン化を実行（このとき内部でotf.saveが走るが、post=3.0なら通る）
             cffsubr.subroutinize(otf, cff_version=2)
         
         otf.save(output_path)

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Font Preview Tool</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <header>
+        <h1>Font Preview Tool</h1>
+        <div class="controls">
+            <input type="text" id="sample-text" value="設定">
+            <label>Size: <input type="range" id="size-slider" min="10" max="200" value="48"><span
+                    id="size-value">48px</span></label>
+            <button id="refresh-btn">再読み込み</button>
+            <div id="filter-status" class="filter-status" style="display: none;">
+                <span id="hidden-count">0</span>個のフォントを非表示中
+                <button id="reset-filter-btn">すべて表示</button>
+            </div>
+        </div>
+    </header>
+    <main id="font-list">
+        <div class="loading">フォントを読み込み中...</div>
+    </main>
+    <script src="script.js"></script>
+</body>
+
+</html>
