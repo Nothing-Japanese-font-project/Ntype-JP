@@ -1,0 +1,23 @@
+[project]
+name = "ntype-jp"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "shibadogcap", email = "yuuki1315s@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "defcon>=0.12.2",
+    "fonttools>=4.61.1",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.0",
+    "requests>=2.32.5",
+    "tqdm>=4.67.1",
+    "ufo-extractor>=0.8.1",
+    "ufo2ft>=3.7.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

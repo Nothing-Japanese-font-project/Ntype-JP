@@ -1,0 +1,1 @@
+# ntype_jp package
