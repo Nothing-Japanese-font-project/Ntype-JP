@@ -1,5 +1,6 @@
 import numpy as np
-from typing import List, Dict, Any, Optional
+from matplotlib.path import Path
+from typing import List, Dict, Any, Optional, Tuple
 
 class GlyphEffect:
     """グリフ加工処理の基底クラス"""
@@ -75,6 +76,210 @@ class HorizontalBolder(GlyphEffect):
             for i, val in enumerate(mod):
                 points[i]['y'] += val
         return glyph_data
+
+
+class HorizontalStrokeLeftCut(GlyphEffect):
+    """横画の左端を斜め（バックスラッシュ方向＼）に切り落とす処理
+    
+    明朝体の横画の開始部分に特徴的な斜めカットを追加する。
+    上下両方のコーナーを調整して線幅を維持する。
+    """
+    def __init__(self, cut_size: float = 12.0, min_length: float = 100.0):
+        """
+        Args:
+            cut_size: 切り落としの大きさ（ピクセル単位）
+            min_length: 対象とする最小水平線分長
+        """
+        self.cut_size = cut_size
+        self.min_length = min_length
+
+    def apply(self, glyph_data: Dict[str, Any]) -> Dict[str, Any]:
+        """横画の左端を検出し、斜めカットを適用する
+        
+        横画の左端の上下両方のコーナーを調整して、
+        線幅を維持しながらバックスラッシュ状のカットを表現する。
+        """
+        for contour in glyph_data['contours']:
+            clockwise = contour['clockwise']
+            points = contour['points']
+            n = len(points)
+            if n < 4:
+                continue
+            
+            # 横画の左端の上下コーナーを検出
+            for i in range(n):
+                p = points[i]
+                p_next = points[(i + 1) % n]
+                p_prev = points[(i - 1) % n]
+                
+                if p.get('segmentType') != 'line':
+                    continue
+                
+                dx_next = p_next['x'] - p['x']
+                dy_next = p_next['y'] - p['y']
+                length_next = np.sqrt(dx_next**2 + dy_next**2)
+                
+                dx_prev = p['x'] - p_prev['x']
+                dy_prev = p['y'] - p_prev['y']
+                length_prev = np.sqrt(dx_prev**2 + dy_prev**2)
+                
+                # 水平で右向きの十分長い線分の始点を検出（外側輪郭の上辺）
+                if length_next >= self.min_length and dx_next > 0 and abs(dy_next) < 5:
+                    is_vertical_prev = length_prev > 30 and abs(dx_prev) < abs(dy_prev) * 0.3
+                    if not clockwise and dy_prev < -30 and is_vertical_prev:
+                        # 上コーナー: 右下に移動
+                        p['x'] += self.cut_size * 0.8
+                        p['y'] -= self.cut_size * 0.6
+                
+                # 水平で左向きの十分長い線分の終点を検出（外側輪郭の下辺）
+                if length_prev >= self.min_length and dx_prev < 0 and abs(dy_prev) < 5:
+                    is_vertical_next = length_next > 30 and abs(dx_next) < abs(dy_next) * 0.3
+                    if not clockwise and dy_next > 30 and is_vertical_next:
+                        # 下コーナー: 右上に移動
+                        p['x'] += self.cut_size * 0.8
+                        p['y'] += self.cut_size * 0.6
+        
+        return glyph_data
+
+
+
+class InkTrap(GlyphEffect):
+    """交差点に墨だまり（インクトラップ）を追加する処理
+    
+    画が交差する箇所の内角に小さな凹みを追加することで、
+    印刷時のインクの滲みを軽減し、視認性を向上させる。
+    """
+    def __init__(self, trap_size: float = 8.0, min_angle: float = 30.0, max_angle: float = 150.0,
+                 min_segment_length: float = 50.0):
+        """
+        Args:
+            trap_size: 墨だまりの深さ（ピクセル単位）
+            min_angle: 処理対象とする最小交差角度（度）
+            max_angle: 処理対象とする最大交差角度（度）
+            min_segment_length: 処理対象とする最小線分長（短すぎる線分や点を除外）
+        """
+        self.trap_size = trap_size
+        self.min_angle = np.radians(min_angle)
+        self.max_angle = np.radians(max_angle)
+        self.min_segment_length = min_segment_length
+
+    def _get_angle(self, v1: np.ndarray, v2: np.ndarray) -> float:
+        """2つのベクトル間の角度を計算（ラジアン）"""
+        d1 = np.linalg.norm(v1)
+        d2 = np.linalg.norm(v2)
+        if d1 < 1e-6 or d2 < 1e-6:
+            return np.pi  # 長さがほぼゼロの場合は180度を返す
+        cos_theta = np.clip(np.dot(v1, v2) / (d1 * d2), -1.0, 1.0)
+        return np.arccos(cos_theta)
+
+    def _is_inner_corner(self, v1: np.ndarray, v2: np.ndarray, clockwise: bool) -> bool:
+        """凹角（内側の角）かどうかを判定"""
+        cross = np.cross(v1, v2)
+        # PostScript形式: 外側輪郭はCCW、内側輪郭はCW
+        # clockwise=Trueなら内側輪郭
+        return (cross > 0) if clockwise else (cross < 0)
+
+    def apply(self, glyph_data: Dict[str, Any]) -> Dict[str, Any]:
+        """交差点を検出し、墨だまりを追加する"""
+        # TODO: 一時的に無効化 - 後で修正予定
+        return glyph_data
+
+
+class SerifTrapezoid(GlyphEffect):
+    """うろこ（セリフ）を三角形から台形に変換する処理
+    
+    Noto Serif JPのうろこはcurve（ベジェ曲線）で構成されているため、
+    curveの頂点を2つのline点に分割して平らな上辺を作成する。
+    """
+    def __init__(self, flat_ratio: float = 0.15):
+        """
+        Args:
+            flat_ratio: 上辺の幅を決める比率（大きいほど広い台形）
+        """
+        self.flat_ratio = flat_ratio
+
+    def apply(self, glyph_data: Dict[str, Any]) -> Dict[str, Any]:
+        """うろこの曲線頂点を検出し、2つのline点に分割して台形を作成
+        
+        一時的に無効化中
+        """
+        return glyph_data  # 一時的に無効化
+        
+        for contour in glyph_data['contours']:
+            clockwise = contour['clockwise']
+            points = contour['points']
+            n = len(points)
+            
+            if n < 5 or clockwise:  # 外側輪郭のみ対象
+                continue
+            
+            # うろこ頂点インデックスを検出
+            serif_indices = set()
+            for i in range(n):
+                p = points[i]
+                p_prev = points[(i - 1) % n]
+                p_next = points[(i + 1) % n]
+                
+                if (p.get('segmentType') == 'curve' and 
+                    p_next.get('segmentType') == 'line' and
+                    p_prev.get('segmentType') is None):
+                    
+                    dx = p_next['x'] - p['x']
+                    dy = p_next['y'] - p['y']
+                    dist = np.sqrt(dx**2 + dy**2)
+                    
+                    # うろこの特徴: 適度な距離で左下方向
+                    if 30 < dist < 200 and dx < 0 and dy < 0:
+                        serif_indices.add(i)
+            
+            if not serif_indices:
+                continue
+            
+            # 新しいポイントリストを構築
+            new_points = []
+            skip_next = 0
+            
+            for i in range(n):
+                if skip_next > 0:
+                    skip_next -= 1
+                    continue
+                
+                p = points[i]
+                
+                if i in serif_indices:
+                    # うろこ頂点: 2つのline点に分割
+                    p_prev2 = points[(i - 2) % n]  # 前のcurve点（右側）
+                    p_next = points[(i + 1) % n]   # 次のline点
+                    
+                    # 上辺の左端（現在の頂点を少し下げた位置）
+                    flat_width = self.flat_ratio * 50  # 固定幅
+                    left_x = p['x'] - flat_width * 0.3
+                    left_y = p['y'] - flat_width * 0.5
+                    
+                    # 上辺の右端
+                    right_x = p['x'] + flat_width * 0.3
+                    right_y = p['y'] - flat_width * 0.5
+                    
+                    # 左側の点を追加（lineタイプ）
+                    new_points.append({
+                        'x': left_x, 'y': left_y,
+                        'segmentType': 'line', 'smooth': False
+                    })
+                    # 右側の点を追加（lineタイプ）
+                    new_points.append({
+                        'x': right_x, 'y': right_y,
+                        'segmentType': 'line', 'smooth': False
+                    })
+                    
+                else:
+                    # 通常の点はそのまま追加
+                    new_points.append(p)
+            
+            contour['points'] = new_points
+        
+        return glyph_data
+
+
 
 
 class CornerEnhancer(GlyphEffect):

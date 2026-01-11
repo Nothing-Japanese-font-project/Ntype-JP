@@ -5,19 +5,25 @@ import tqdm
 import re
 import os
 from concurrent.futures import ProcessPoolExecutor
-from effects import HorizontalBolder, CornerEnhancer, CornerRounder, Normalizer
+from effects import HorizontalBolder, HorizontalStrokeLeftCut, InkTrap, SerifTrapezoid, CornerEnhancer, CornerRounder, Normalizer
 
 def process_glyph_worker(glyph_data):
     """並列処理用ワーカー（インスタンスを再利用して高速化）"""
     # init_workerで事前に生成されたインスタンスを取得
     bolder = getattr(process_glyph_worker, 'bolder', HorizontalBolder(adjust=9))
+    left_cut = getattr(process_glyph_worker, 'left_cut', HorizontalStrokeLeftCut())
+    ink_trap = getattr(process_glyph_worker, 'ink_trap', InkTrap())
+    serif_trap = getattr(process_glyph_worker, 'serif_trap', SerifTrapezoid())
     enhancer = getattr(process_glyph_worker, 'enhancer', CornerEnhancer())
-    rounder = getattr(process_glyph_worker, 'rounder', CornerRounder(size=20))
+    rounder = getattr(process_glyph_worker, 'rounder', CornerRounder(size=12))
     normalizer = getattr(process_glyph_worker, 'normalizer', Normalizer())
     
     bolder.apply(glyph_data)
+    left_cut.apply(glyph_data)
+    ink_trap.apply(glyph_data)
+    serif_trap.apply(glyph_data)
     enhancer.apply(glyph_data)
-    rounder.apply(glyph_data)
+    # rounder.apply(glyph_data)  # 一時的に無効化
     normalizer.apply(glyph_data)
     
     # 座標を整数に丸める（浮動小数点を排除してファイルサイズを削減）
@@ -31,8 +37,11 @@ def process_glyph_worker(glyph_data):
 def init_worker(rs):
     """ワーカープロセスの初期化（エフェクトを一度だけ生成）"""
     process_glyph_worker.bolder = HorizontalBolder(adjust=9)
+    process_glyph_worker.left_cut = HorizontalStrokeLeftCut()
+    process_glyph_worker.ink_trap = InkTrap()
+    process_glyph_worker.serif_trap = SerifTrapezoid()
     process_glyph_worker.enhancer = CornerEnhancer()
-    process_glyph_worker.rounder = CornerRounder(size=rs)
+    process_glyph_worker.rounder = CornerRounder(size=rs if rs != 20 else 12)
     process_glyph_worker.normalizer = Normalizer()
 
 class FontProcessor:
